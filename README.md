@@ -1,15 +1,13 @@
-# 李奥视频工作室（liao-video-studio）
+# 视频故事工坊
 
-使用者可以自行修改本 skill（改音色、改画幅、改流程都行），改完署名保留“李奥视频工坊”即可；改后的版本责任自负。
-
-做历史人物传记、历史叙事、书籍改编类图文视频的完整流程。主线是历史类，书籍改编（与神对话线）是第二条线。按这套流程，李奥号已经做了 11 期，最高单条 31.8 万播放；第一期全程没提一句“买”，也没做带货口播，卖了 9 本书。
+做历史人物传记、历史叙事、书籍改编类图文视频的完整流程。主线是历史类，书籍改编（与神对话线）是第二条线。
 
 先做一条，再回头改流程。
 
 ## 这个 skill 是什么
 
 - 一份完整工作流（`SKILL.md`）：从选题、溯源脚本、确认、配音、配图、分镜、合成、质检到交付，共 10 步。主线是历史类，书籍改编线是第二条线。
-- 一个爆款种子库（`seed-library/`）：与神对话 7 条种子 + 历史 6 条种子 + 历史选题清单，全部来自李奥号自己的成片和数据。
+- 一个案例库（`seed-library/`）：与神对话 7 条种子 + 历史 6 条种子 + 历史选题清单。配套写作 DNA 覆盖开头、结构和口播用语。
 - 两个脚本（`scripts/`）：豆包配音 + FFmpeg 合成出片，都是能直接跑的。
 - 一份计划示例（`plan.json`）：照着填，就能出片。
 
@@ -17,21 +15,17 @@
 
 ## 安装后直接用
 
-把这一句发给有文件操作权限的 Agent。
+解压安装包，把下面这句话发给有文件操作权限的 Agent。
 
-> 从 https://github.com/MQIMQ/shipinzhizuo 安装 `liao-video-studio`。把仓库根目录的 `SKILL.md`、`scripts/`、`seed-library/` 和 `plan.json` 一起保留在同一个技能文件夹，安装到你支持的 Skills 目录，然后检查能否调用。
+> 请把我提供的 `video-story-workshop` 文件夹安装到你的 Skills 目录，保留完整目录结构。安装后用 `video-story-workshop` 帮我做一条竖版历史短片。
 
-Codex CLI 也可以直接装到个人技能目录。
-
-```bash
-git clone https://github.com/MQIMQ/shipinzhizuo.git "$HOME/.agents/skills/liao-video-studio"
-```
+Codex CLI 安装时，把解压后的 `video-story-workshop` 目录整个复制到 `~/.agents/skills/`。
 
 装好后，按你手上的素材直接交代任务。
 
-- `用 $liao-video-studio 做一条 45 秒的历史故事短片，从查资料到导出竖版 MP4，直接做。`
-- `用 $liao-video-studio，稿子和旁白都有了，按这段音频给我分镜。`
-- `用 $liao-video-studio，用这个文件夹里的旁白和图片直接出 MP4。`
+- `用 $video-story-workshop 做一条 45 秒的历史故事短片，从查资料到导出竖版 MP4，直接做。`
+- `用 $video-story-workshop，稿子和旁白都有了，按这段音频给我分镜。`
+- `用 $video-story-workshop，用这个文件夹里的旁白和图片直接出 MP4。`
 
 | 要做的事 | Agent 按需检查 |
 |---|---|
@@ -85,8 +79,8 @@ python3 scripts/render.py --plan plan.json --check-only   # 只核验计划，�
 |---|---|
 | `SKILL.md` | 完整工作流：10 步 + 铁律 + 检查表 + 带货口播格式 + 开头速查（历史主线） |
 | `README.md` | 本文件：安装使用说明 |
-| `seed-library/` | 爆款种子库：与神对话 7 条 + 历史 6 条 + 历史选题清单 |
-| `LICENSE` | MIT 许可证：可自由修改、分发，署名保留“李奥视频工坊” |
+| `seed-library/` | 案例库：与神对话 7 条 + 历史 6 条 + 历史选题清单 |
+| `LICENSE` | MIT 许可证。分发时请附上本文件 |
 | `scripts/doubao_tts.py` | 豆包 TTS 配音：四个预置音色，默认云舟，不克隆 |
 | `scripts/render.py` | FFmpeg 合成：图片 + 旁白 → mp4，封面 0.5 秒开场，画幅按 plan.json |
 | `plan.json` | 合成计划示例 |

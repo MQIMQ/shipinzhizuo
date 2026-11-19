@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slideshow renderer for liao-video-studio.
+"""Slideshow renderer for video-story-workshop.
 
 Builds an mp4 from still images and a narration mp3, following the
 project's fixed look:
@@ -270,7 +270,7 @@ def render_project(plan: dict, output: Path, ffmpeg: str, ffprobe: str, force: b
     nominal = [segment["frames"] for segment in segments]
     fades = fade_lengths(nominal, plan["fps"])
 
-    with tempfile.TemporaryDirectory(prefix=".liao-render-", dir=output.parent) as folder:
+    with tempfile.TemporaryDirectory(prefix=".story-render-", dir=output.parent) as folder:
         directory = Path(folder)
         clips = []
         for index, segment in enumerate(segments):
