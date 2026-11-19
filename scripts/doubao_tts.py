@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
 from contextlib import suppress
 from enum import IntEnum
 import getpass
@@ -25,6 +26,7 @@ RESOURCE_ID = "seed-tts-2.0"
 NAMESPACE = "BidirectionalTTS"
 SERVICE_OK = 20000000
 RECEIVE_TIMEOUT = 120
+TEXT_CHUNK_BYTES = 800
 
 PRESET_VOICES = {
     "zh_male_m191_uranus_bigtts": "云舟",
@@ -98,13 +100,16 @@ def response_frame(frame: bytes) -> tuple[int, bytes, bytes]:
     kind, flags = divmod(frame[1], 16)
     if kind == 15:
         raise TtsError(f"Doubao service error {read_number()}")
-    if kind not in (9, 11) or not flags & 4:
+    has_event = bool(flags & 4)
+    if kind != 11 and (kind != 9 or not has_event):
         raise TtsError("unexpected Doubao response type")
     if flags & 1:
         read(4)  # Optional sequence number.
 
-    event = read_number()
-    identifier = read(read_number())  # Connection ID or session ID, depending on event.
+    event = read_number() if has_event else 0
+    # Event-bearing frames carry a connection or session identifier. Raw
+    # audio can arrive without an event in this dedicated connection.
+    identifier = read(read_number()) if has_event else b""
     payload = read(read_number())
     if position != len(frame):
         raise TtsError("unexpected trailing data in Doubao response")
@@ -132,6 +137,20 @@ def response_frame(frame: bytes) -> tuple[int, bytes, bytes]:
     if event == Event.AUDIO and kind != 11:
         raise TtsError("expected a binary Doubao audio response")
     return event, identifier, payload
+
+
+def text_chunks(text: str) -> Iterator[str]:
+    start = 0
+    size = 0
+    for index, character in enumerate(text):
+        width = len(character.encode("utf-8"))
+        if size + width > TEXT_CHUNK_BYTES:
+            yield text[start:index]
+            start = index
+            size = 0
+        size += width
+    if start < len(text):
+        yield text[start:]
 
 
 def synthesise(text: str, speaker: str, api_key: str) -> bytes:
@@ -166,15 +185,19 @@ def synthesise(text: str, speaker: str, api_key: str) -> bytes:
             if event != Event.SESSION_STARTED or identifier != session:
                 raise TtsError("Doubao did not confirm the requested synthesis session")
 
-            socket.send(request_frame(Event.TASK_REQUEST, {
-                "event": Event.TASK_REQUEST, "namespace": NAMESPACE,
-                "req_params": {**settings, "text": text},
-            }, session))
+            for chunk in text_chunks(text):
+                socket.send(request_frame(Event.TASK_REQUEST, {
+                    "event": Event.TASK_REQUEST, "namespace": NAMESPACE,
+                    "req_params": {**settings, "text": chunk},
+                }, session))
             socket.send(request_frame(Event.FINISH_SESSION, {}, session))
 
             audio = bytearray()
             while True:
                 event, identifier, data = response_frame(socket.recv(timeout=RECEIVE_TIMEOUT))
+                if event == 0 and not identifier:
+                    audio.extend(data)
+                    continue
                 if identifier != session:
                     raise TtsError(f"unexpected Doubao session in event {event}")
                 if event == Event.SESSION_FINISHED:

@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import subprocess
 import sys
 import tempfile
@@ -70,51 +71,47 @@ def run(command: list[str], description: str) -> None:
         )
 
 
-def probe_duration(path: Path, ffprobe: str) -> float:
-    """Return the duration in seconds of an audio/video file."""
+def probe_media(path: Path, ffprobe: str) -> dict:
     result = subprocess.run(
-        [ffprobe, "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if result.returncode != 0:
-        raise RenderError(f"ffprobe could not read {path}")
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        raise RenderError(f"ffprobe returned no duration for {path}")
-
-
-def probe_video(path: Path, ffprobe: str) -> dict:
-    """Return width, height, fps and stream kinds of a video file."""
-    result = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=width,height,r_frame_rate",
-         "-show_entries", "format=duration",
+        [ffprobe, "-v", "error", "-show_streams", "-show_format",
          "-of", "json", str(path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    if result.returncode != 0:
+    if result.returncode:
         raise RenderError(f"ffprobe could not read {path}")
-    info = json.loads(result.stdout)
-    stream = info["streams"][0]
-    num, den = stream["r_frame_rate"].split("/")
-    return {
-        "width": stream["width"],
-        "height": stream["height"],
-        "fps": int(num) / int(den),
-        "duration": float(info["format"]["duration"]),
-        "has_audio": _has_stream(path, ffprobe, "a"),
-    }
+    return json.loads(result.stdout)
 
 
-def _has_stream(path: Path, ffprobe: str, kind: str) -> bool:
-    result = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", f"{kind}:0",
-         "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    return result.returncode == 0 and result.stdout.strip() != ""
+def audio_duration(info: dict, path: Path) -> float:
+    audio = next((stream for stream in info["streams"] if stream["codec_type"] == "audio"), None)
+    if audio is None:
+        raise RenderError(f"no audio stream in {path}")
+    try:
+        duration = float(audio.get("duration") or info["format"]["duration"])
+    except (KeyError, ValueError, TypeError) as exc:
+        raise RenderError(f"no readable audio duration in {path}") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise RenderError(f"invalid audio duration in {path}")
+    return duration
+
+
+def verify_output(path: Path, plan: dict, ffmpeg: str, ffprobe: str) -> None:
+    info = probe_media(path, ffprobe)
+    video = [stream for stream in info["streams"] if stream["codec_type"] == "video"]
+    if len(video) != 1 or len(info["streams"]) != 2:
+        raise RenderError("final MP4 needs exactly one video and one audio stream")
+    stream = video[0]
+    numerator, denominator = map(int, stream["r_frame_rate"].split("/"))
+    if (
+        (stream["width"], stream["height"]) != (plan["width"], plan["height"])
+        or numerator != plan["fps"] * denominator
+        or int(stream.get("nb_frames", 0)) != plan["frames"]
+    ):
+        raise RenderError("output dimensions, frame rate or frame count do not match the plan")
+    if abs(audio_duration(info, path) - plan["audio_seconds"]) > plan["tolerance"]:
+        raise RenderError("final MP4 does not retain the planned narration duration")
+    run([ffmpeg, "-nostdin", "-v", "error", "-xerror", "-i", str(path),
+         "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"], "verify final MP4")
 
 
 def load_plan(plan_path: Path) -> dict:
@@ -137,8 +134,10 @@ def load_plan(plan_path: Path) -> dict:
     height = int(plan.get("height", DEFAULT_HEIGHT))
     fps = int(plan.get("fps", DEFAULT_FPS))
     crf = int(plan.get("crf", DEFAULT_CRF))
-    if width <= 0 or height <= 0 or fps <= 0:
-        raise RenderError("width, height and fps must be positive")
+    if width <= 0 or height <= 0 or width % 2 or height % 2 or not 1 <= fps <= 120:
+        raise RenderError("width and height must be positive even numbers; fps must be 1–120")
+    if not 0 <= crf <= 51:
+        raise RenderError("crf must be between 0 and 51")
     audio = resolve(plan["audio"], "audio") if "audio" in plan else None
     if audio is None:
         raise RenderError('plan needs an "audio" file')
@@ -155,7 +154,7 @@ def load_plan(plan_path: Path) -> dict:
     segments: list[dict] = []
     if cover is not None:
         first = float(shots[0]["duration"])
-        if first <= COVER_SECONDS:
+        if not math.isfinite(first) or first <= COVER_SECONDS:
             raise RenderError(
                 "first shot must be longer than 0.5 s when a cover is set"
             )
@@ -168,21 +167,44 @@ def load_plan(plan_path: Path) -> dict:
         start = 0
     for shot in shots[start:]:
         duration = float(shot["duration"])
-        if duration <= 0:
+        if not math.isfinite(duration) or duration <= 0:
             raise RenderError("shot durations must be positive")
         segments.append({"kind": "shot",
                          "image": resolve(shot["image"], "shot image"),
                          "duration": duration})
 
-    total = sum(seg["duration"] for seg in segments)
+    elapsed, cursor = 0.0, 0
+    for segment in segments:
+        elapsed += segment["duration"]
+        end_frame = round(elapsed * fps)
+        if end_frame <= cursor:
+            raise RenderError(f"shot {segment['image'].name} is shorter than one output frame")
+        segment["frames"] = end_frame - cursor
+        cursor = end_frame
+
     return {"width": width, "height": height, "fps": fps, "crf": crf,
-            "audio": audio, "segments": segments, "total": total}
+            "audio": audio, "segments": segments, "total": cursor / fps, "frames": cursor}
 
 
-def render_segment(image: Path, kind: str, seconds: float, width: int,
+def check_narration(plan: dict, ffprobe: str) -> None:
+    info = probe_media(plan["audio"], ffprobe)
+    measured = audio_duration(info, plan["audio"])
+    # MP3 container duration can include encoder padding. Quantized
+    # picture boundaries can differ from the planned time by one frame.
+    tolerance = 1 / plan["fps"] + 0.05
+    if abs(plan["total"] - measured) > tolerance:
+        raise RenderError(
+            f"timeline {plan['total']:.3f}s vs narration {measured:.3f}s; "
+            "adjust shot durations before rendering"
+        )
+    plan["audio_seconds"] = measured
+    plan["tolerance"] = tolerance
+
+
+def render_segment(image: Path, kind: str, frames: int, width: int,
                    height: int, fps: int, crf: int, out_path: Path,
                    ffmpeg: str) -> None:
-    """Render one still image into a video segment of `seconds`."""
+    """Render exactly the requested number of frames from a still image."""
     if kind == "cover":
         # Static: fill the frame, no push-in.
         video_filter = (
@@ -199,54 +221,83 @@ def render_segment(image: Path, kind: str, seconds: float, width: int,
             f"s={width}x{height}:fps={fps},format=yuv420p"
         )
     run([
-        ffmpeg, "-hide_banner", "-loglevel", "error",
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-filter_threads", "1",
         "-loop", "1", "-framerate", str(fps), "-i", str(image),
         "-vf", video_filter,
-        "-t", f"{seconds:.3f}",
+        "-frames:v", str(frames),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf),
         "-an", "-y", str(out_path),
     ], f"render segment {image.name}")
 
 
-def join_segments(segment_files: list[Path], nominal: list[float],
-                  width: int, height: int, fps: int, crf: int,
-                  out_path: Path, ffmpeg: str, tmpdir: Path) -> None:
-    """Crossfade the rendered segments into one silent video."""
-    count = len(segment_files)
-    if count == 1:
-        run([
-            ffmpeg, "-hide_banner", "-loglevel", "error",
-            "-i", str(segment_files[0]),
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf),
-            "-an", "-y", str(out_path),
-        ], "copy single segment")
-        return
-    # Per-boundary crossfade, clamped so it never exceeds either side.
-    fades = [min(CROSSFADE_SECONDS, nominal[k], nominal[k + 1])
-             for k in range(count - 1)]
-    # Each segment was rendered longer by its outgoing fade; offsets are
-    # cumulative nominal durations, so the total stays exact.
-    offsets = [sum(nominal[:k + 1]) for k in range(count - 1)]
-    inputs: list[str] = []
-    for path in segment_files:
-        inputs += ["-i", str(path)]
-    filters: list[str] = []
+def fade_lengths(frames: list[int], fps: int) -> list[int]:
+    maximum = max(1, round(CROSSFADE_SECONDS * fps))
+    return [min(maximum, left, right) for left, right in zip(frames, frames[1:])]
+
+
+def join_segments(segment_files: list[Path], nominal: list[int], fades: list[int],
+                  fps: int, crf: int, out_path: Path, ffmpeg: str) -> None:
+    """Crossfade padded clips at the frame boundaries in the plan."""
+    inputs = [token for path in segment_files for token in ("-i", str(path))]
+    filters = []
     current = "0:v"
-    for k in range(count - 1):
-        out_label = f"x{k}"
+    offset = 0
+    for index, fade in enumerate(fades, 1):
+        offset += nominal[index - 1]
+        target = f"x{index}"
         filters.append(
-            f"[{current}][{k + 1}:v]xfade=transition=fade:"
-            f"duration={fades[k]:.3f}:offset={offsets[k]:.3f}[{out_label}]"
+            f"[{current}][{index}:v]xfade=transition=fade:"
+            f"duration={fade / fps:.9f}:offset={offset / fps:.9f}[{target}]"
         )
-        current = out_label
+        current = target
     filters.append(f"[{current}]format=yuv420p[vout]")
     run([
-        ffmpeg, "-hide_banner", "-loglevel", "error",
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-filter_complex_threads", "1",
         *inputs, "-filter_complex", ";".join(filters),
         "-map", "[vout]", "-r", str(fps),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(crf),
         "-an", "-y", str(out_path),
     ], "crossfade segments")
+
+
+def render_project(plan: dict, output: Path, ffmpeg: str, ffprobe: str, force: bool) -> None:
+    if output.suffix.lower() != ".mp4":
+        raise RenderError("output must end in .mp4")
+    if output.exists() and not force:
+        raise RenderError(f"{output} already exists; choose a new filename or use --force")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    segments = plan["segments"]
+    nominal = [segment["frames"] for segment in segments]
+    fades = fade_lengths(nominal, plan["fps"])
+
+    with tempfile.TemporaryDirectory(prefix=".liao-render-", dir=output.parent) as folder:
+        directory = Path(folder)
+        clips = []
+        for index, segment in enumerate(segments):
+            clip = directory / f"seg{index:03d}.mp4"
+            clip_frames = nominal[index] + (fades[index] if index < len(fades) else 0)
+            render_segment(segment["image"], segment["kind"], clip_frames,
+                           plan["width"], plan["height"], plan["fps"], plan["crf"],
+                           clip, ffmpeg)
+            clips.append(clip)
+
+        silent = clips[0]
+        if fades:
+            silent = directory / "silent.mp4"
+            join_segments(clips, nominal, fades, plan["fps"], plan["crf"], silent, ffmpeg)
+        final = directory / "final.mp4"
+        run([
+            ffmpeg, "-hide_banner", "-loglevel", "error",
+            "-i", str(silent), "-i", str(plan["audio"]),
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", str(final),
+        ], "mux full narration")
+        verify_output(final, plan, ffmpeg, ffprobe)
+        if force:
+            os.replace(final, output)
+        else:
+            os.link(final, output)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,68 +310,22 @@ def main(argv: list[str] | None = None) -> int:
                         help="validate the plan without rendering")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
+    parser.add_argument("--force", action="store_true", help="replace an existing verified output")
     args = parser.parse_args(argv)
 
     try:
         plan = load_plan(args.plan)
-    except RenderError as exc:
+        check_narration(plan, args.ffprobe)
+        print(f"plan: {len(plan['segments'])} segments, "
+              f"{plan['width']}x{plan['height']} @{plan['fps']}fps, "
+              f"{plan['frames']} frames, narration {plan['audio_seconds']:.3f}s")
+        if not args.check_only:
+            render_project(plan, args.output, args.ffmpeg, args.ffprobe, args.force)
+            print(f"done: {args.output} ({plan['total']:.3f}s, frame count and audio verified)")
+        return 0
+    except (OSError, RenderError, KeyError, ValueError, TypeError, OverflowError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-
-    segments = plan["segments"]
-    nominal = [seg["duration"] for seg in segments]
-    print(f"plan: {len(segments)} segments, "
-          f"{plan['width']}x{plan['height']} @{plan['fps']}fps, "
-          f"total {plan['total']:.2f}s")
-    for index, seg in enumerate(segments):
-        print(f"  [{index}] {seg['kind']:5s} {seg['duration']:6.2f}s  "
-              f"{seg['image'].name}")
-    if args.check_only:
-        return 0
-
-    # Render each segment longer by its outgoing crossfade, except the
-    # last one; the xfade overlaps then bring the total back to exact.
-    fades = [min(CROSSFADE_SECONDS, nominal[k], nominal[k + 1])
-             for k in range(len(nominal) - 1)]
-    rendered = [
-        nominal[k] + (fades[k] if k < len(fades) else 0.0)
-        for k in range(len(nominal))
-    ]
-
-    with tempfile.TemporaryDirectory(prefix="liao-render-") as tmp:
-        tmpdir = Path(tmp)
-        segment_files: list[Path] = []
-        for index, seg in enumerate(segments):
-            out = tmpdir / f"seg{index:03d}.mp4"
-            render_segment(seg["image"], seg["kind"], rendered[index],
-                           plan["width"], plan["height"], plan["fps"],
-                           plan["crf"], out, args.ffmpeg)
-            segment_files.append(out)
-        silent = tmpdir / "silent.mp4"
-        join_segments(segment_files, nominal, plan["width"], plan["height"],
-                      plan["fps"], plan["crf"], silent, args.ffmpeg, tmpdir)
-        run([
-            args.ffmpeg, "-hide_banner", "-loglevel", "error",
-            "-i", str(silent), "-i", str(plan["audio"]),
-            "-map", "0:v", "-map", "1:a",
-            "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
-            "-shortest", "-movflags", "+faststart",
-            "-y", str(args.output),
-        ], "mux audio")
-
-    info = probe_video(args.output, args.ffprobe)
-    audio_len = probe_duration(plan["audio"], args.ffprobe)
-    print(f"done: {args.output}  {info['width']}x{info['height']} "
-          f"@{info['fps']:.0f}fps  {info['duration']:.2f}s  "
-          f"audio {'yes' if info['has_audio'] else 'NO'}")
-    if abs(info["duration"] - audio_len) > 1.0:
-        print(f"warning: video {info['duration']:.2f}s vs audio "
-              f"{audio_len:.2f}s differ by more than 1 s; "
-              f"check the segment durations", file=sys.stderr)
-    if (info["width"], info["height"]) != (plan["width"], plan["height"]):
-        print("warning: output size does not match the plan",
-              file=sys.stderr)
-    return 0
 
 
 if __name__ == "__main__":

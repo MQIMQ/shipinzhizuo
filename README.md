@@ -15,28 +15,30 @@
 
 成品：旁白 + 分段配图 + 轻动效的长视频（主力 6 分钟左右），历史线默认 9:16 竖版，书籍问答线 3:4（1080x1440），mp4 直接出片，封面剪进片头前 0.5 秒。
 
-## 需要什么
+## 安装后直接用
 
-| 东西 | 用途 | 怎么弄 |
-|---|---|---|
-| Python 3.10 以上 | 跑两个脚本 | 系统自带或官网装 |
-| FFmpeg（含 ffprobe） | 合成、校验 | 官网下官方构建，装好确认 `ffmpeg -version` 能跑 |
-| 豆包语音 Key | 配音 | 火山引擎语音控制台开通普通 2.0 音色服务，在 API Key 管理里创建语音 Key |
-| websockets 15–16 | 豆包 V3 双向连接 | `python3 -m pip install 'websockets>=15,<17'` |
-| 写稿工具 | 写脚本 | Antigravity CLI（`agy`）调 Gemini；不要用 Gemini CLI 的 Google 登录，已验证不可用 |
-| 生图工具 | 配图 | Codex 图像生成，模型 gpt-6-luna |
+把这一句发给有文件操作权限的 Agent。
 
-写稿和配图需要表中所列的能力。自动配音需要 Python、websockets、FFmpeg 和已开通豆包语音资源的 Key。
+> 从 https://github.com/MQIMQ/shipinzhizuo 安装 `liao-video-studio`。把仓库根目录的 `SKILL.md`、`scripts/`、`seed-library/` 和 `plan.json` 一起保留在同一个技能文件夹，安装到你支持的 Skills 目录，然后检查能否调用。
 
-## 怎么装进你的 agent
-
-把整个 `liao-video-studio` 文件夹复制到你 agent 的 skills 目录里，例如：
+Codex CLI 也可以直接装到个人技能目录。
 
 ```bash
-cp -r liao-video-studio ~/.codex/skills/liao-video-studio
+git clone https://github.com/MQIMQ/shipinzhizuo.git "$HOME/.agents/skills/liao-video-studio"
 ```
 
-不同 agent 的 skills 目录位置不一样，放进你那个 agent 能读到的 skills 目录就行。装好后直接对 agent 说“用 liao-video-studio 帮我做一条视频”。
+装好后，按你手上的素材直接交代任务。
+
+- `用 $liao-video-studio 做一条 45 秒的历史故事短片，从查资料到导出竖版 MP4，直接做。`
+- `用 $liao-video-studio，稿子和旁白都有了，按这段音频给我分镜。`
+- `用 $liao-video-studio，用这个文件夹里的旁白和图片直接出 MP4。`
+
+| 要做的事 | Agent 按需检查 |
+|---|---|
+| 选题、写稿、提示词 | 使用当前 Agent 的写作能力。核查史料时使用可用的检索工具或用户提供的资料。 |
+| 实际配图 | 优先复用现有图片，其次用当前 Agent 的生图工具。缺少图片和生图能力时先交分镜和提示词。 |
+| 配音 | 优先复用现成音频。豆包需要 Python 3.10+、FFmpeg、`websockets` 和语音服务 Key；也可用用户指定的 Agent 自带配音工具。 |
+| 合成 MP4 | Python 3.10+、FFmpeg（含 `ffprobe`、libx264 和 xfade）。Agent 按需要检查和配置。 |
 
 ## 怎么跑：一条片子四步
 
@@ -61,7 +63,7 @@ python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --key-stdin
 
 ### 3. 配图和分镜（第 6–7 步）
 
-每段 4 张图，按起承转合递进。先出分镜表和 1 张测试图，确认长相和风格后再批量生成。人物描述全片同一份；图里不带任何文字；单人旁白不出现正对镜头张嘴说话的脸。
+长段落可用 4 张图按起承转合递进，短片按语义和目标时长分镜。先出分镜表和 1 张测试图，确认长相和风格后再批量生成。人物描述全片同一份；图里不带任何文字；单人旁白不出现正对镜头张嘴说话的脸。
 
 ### 4. 合成出片（第 8–10 步）
 
@@ -75,7 +77,7 @@ python3 scripts/render.py --plan plan.json --check-only   # 只核验计划，�
 - 输出就是 mp4（h264 + aac），不用进剪映。
 - 封面填进 plan.json 的 `cover` 字段，会占片头前 0.5 秒，旁白照常播放，总时长不变。第一镜的时长会自动减 0.5 秒，所以第一镜至少要 0.5 秒以上。
 - 每张图缓慢推近，图与图之间 0.8 秒交叉淡化，不烧录字幕。
-- 出片后立刻用 ffprobe 核对总时长、分辨率、帧率、音视频流是否齐全；总时长和音频对不上超过 1 秒，先查原因再交付。
+- `--check-only` 会检查素材和旁白覆盖。渲染完成后核对帧数、画幅、音轨和完整解码，通过后才保存最终文件。
 
 ## 文件说明
 
@@ -93,7 +95,7 @@ python3 scripts/render.py --plan plan.json --check-only   # 只核验计划，�
 
 **配音报鉴权或额度错误**：停在配音这一步，先去控制台核对 Key 和服务开通状态，不要反复重试（失败也可能计费）。
 
-**成片比音频短 / 长超过 1 秒**：多半是某段时长记错了，对照第 4 步的分段时长表逐段查，不要直接交付。
+**计划时长与旁白不符**：先用 ffprobe 实测最终音频，再按分段时长调整镜头。运行 `--check-only` 通过后出片。
 
 **切点处人物突然换姿势**：用前一镜的末帧做参考，重新生成后一镜，再复查这个切点，不要整段推倒。
 
