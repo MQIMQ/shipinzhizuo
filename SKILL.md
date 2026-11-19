@@ -171,7 +171,7 @@ description: 李奥图文视频工作室。按李奥号已跑通的流程做历�
 
 ### 配音工具
 
-用本 skill 的 `scripts/doubao_tts.py`，豆包 TTS 2.0，resource_id 固定 `seed-tts-2.0`。四个预置音色：
+使用 `scripts/doubao_tts.py` 连接豆包 V3 双向 WebSocket，resource_id 固定为普通 2.0 音色的 `seed-tts-2.0`。运行前检查 Python 的 `websockets` 15–16、FFmpeg 和 FFprobe。可选音色如下。
 
 | 音色 | speaker ID | 说明 |
 |---|---|---|
@@ -180,7 +180,9 @@ description: 李奥图文视频工作室。按李奥号已跑通的流程做历�
 | 小何 2.0 | `zh_female_xiaohe_uranus_bigtts` | 自然亲切女声 |
 | Vivi | `zh_female_vv_uranus_bigtts` | 女声 |
 
-只用这四个预置音色，不克隆任何人的声音，不用自定义音色。API Key 从环境变量 `DOUBAO_TTS_API_KEY` 或 `--key-stdin` 安全输入读，绝不写进文件、代码或聊天。
+从上述豆包预置音色中选择。通过宿主安全配置提供 `DOUBAO_TTS_API_KEY`，或在交互终端用 `--key-stdin` 隐藏输入。
+
+运行 `python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3`。附 `--dry-run` 时只检查本地输入。真实合成后核对 MP3 完整解码与时长，再接续分镜。服务超时或中途断连时先查请求状态与已有文件，再决定是否重试。
 
 音频锁死的意思是：音频一旦被接受，后面图片停留多久、视频多长，全都去迁就音频，而不是反过来改音频迁就画面。想改词，先回到第 2 步重新确认。
 

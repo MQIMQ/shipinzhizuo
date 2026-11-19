@@ -21,11 +21,12 @@
 |---|---|---|
 | Python 3.10 以上 | 跑两个脚本 | 系统自带或官网装 |
 | FFmpeg（含 ffprobe） | 合成、校验 | 官网下官方构建，装好确认 `ffmpeg -version` 能跑 |
-| 豆包语音 Key | 配音 | 火山引擎控制台开通豆包语音服务，在 API Key 管理里创建 Key |
+| 豆包语音 Key | 配音 | 火山引擎语音控制台开通普通 2.0 音色服务，在 API Key 管理里创建语音 Key |
+| websockets 15–16 | 豆包 V3 双向连接 | `python3 -m pip install 'websockets>=15,<17'` |
 | 写稿工具 | 写脚本 | Antigravity CLI（`agy`）调 Gemini；不要用 Gemini CLI 的 Google 登录，已验证不可用 |
 | 生图工具 | 配图 | Codex 图像生成，模型 gpt-6-luna |
 
-核心流程（步骤 0–10）只需要 Python + FFmpeg + 豆包 Key 就能跑通。
+写稿和配图需要表中所列的能力。自动配音需要 Python、websockets、FFmpeg 和已开通豆包语音资源的 Key。
 
 ## 怎么装进你的 agent
 
@@ -45,16 +46,17 @@ cp -r liao-video-studio ~/.codex/skills/liao-video-studio
 
 ### 2. 配音（第 4 步）
 
-按段合成，不要一次合成一整篇：
+按段合成。脚本调用豆包 [V3 双向 WebSocket](https://docs.volcengine.com/docs/doubao-voice/bidirectional-streaming-text-to-speech-websocket?lang=zh)，资源固定为普通音色 `seed-tts-2.0`。
 
 ```bash
-export DOUBAO_TTS_API_KEY="你的 Key"
-python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3
-python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --dry-run  # 只核验，不花钱
+python3 -m pip install "websockets>=15,<17"
+python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --dry-run
+python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --key-stdin
 ```
 
 - 默认音色是云舟。想换音色：`--speaker zh_male_liufei_uranus_bigtts`（刘飞 2.0）、`zh_female_xiaohe_uranus_bigtts`（小何 2.0）、`zh_female_vv_uranus_bigtts`（Vivi）。只有这四个预置音色，不克隆声音。
-- Key 也可以用 `--key-stdin` 从标准输入传（输完不留记录），绝不要把 Key 写进文件、代码或聊天。
+- 在终端使用 `--key-stdin` 时会隐藏输入。自动化可从宿主的密钥配置读取 `DOUBAO_TTS_API_KEY` 并省略该参数。
+- `--dry-run` 只检查本地输入。真实合成收到会话结束事件后，脚本会验证 MP3 可完整解码再保存。
 - 每段合成完立刻用 ffprobe 量出真实秒数并记下来，再按顺序拼成完整旁白。
 
 ### 3. 配图和分镜（第 6–7 步）
