@@ -25,7 +25,7 @@ description: 制作中文图文短视频及口播稿，支持历史叙事、知�
 ## 配音和分镜
 
 - 已有旁白优先复用。新配音可用用户指定的宿主工具或豆包预置音色。使用豆包时检查 Python 3.10+、websockets 15–16、FFmpeg、FFprobe，以及已开通的语音 Key。按实际环境配置能配置的依赖。需要授权、Key 或素材时，先完成不依赖缺口的工作。
-- 豆包脚本使用 V3 双向 WebSocket，资源为 `seed-tts-2.0`。默认云舟，另可选刘飞 2.0、小何 2.0、Vivi。Key 从 `DOUBAO_TTS_API_KEY` 读取，也可在终端用 `--key-stdin` 隐藏输入。配音按段合成，避免因一段修改而重跑整篇。
+- 豆包脚本使用 V3 双向 WebSocket，资源为 `seed-tts-2.0`。默认刘飞 2.0，另可选云舟、小何 2.0、Vivi。Key 从 `DOUBAO_TTS_API_KEY` 读取，也可在终端用 `--key-stdin` 隐藏输入。配音按段合成，避免因一段修改而重跑整篇。
 
 ```bash
 python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --dry-run

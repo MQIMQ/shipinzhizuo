@@ -34,7 +34,7 @@ python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --dry-run
 python3 scripts/doubao_tts.py --text-file seg1.txt --output seg1.mp3 --key-stdin
 ```
 
-默认云舟，另可用刘飞 2.0、小何 2.0 或 Vivi，运行 `--help` 查看对应音色 ID。终端用 `--key-stdin` 隐藏输入，自动化可从宿主的密钥配置读取 `DOUBAO_TTS_API_KEY`。检查命令仅核对本地输入。实际音频收到服务结束事件并通过解码校验后才保存。
+默认刘飞 2.0，另可用云舟、小何 2.0 或 Vivi，运行 `--help` 查看对应音色 ID。终端用 `--key-stdin` 隐藏输入，自动化可从宿主的密钥配置读取 `DOUBAO_TTS_API_KEY`。检查命令仅核对本地输入。实际音频收到服务结束事件并通过解码校验后才保存。
 
 ## 合成
 

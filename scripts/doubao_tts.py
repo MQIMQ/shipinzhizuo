@@ -34,7 +34,7 @@ PRESET_VOICES = {
     "zh_female_xiaohe_uranus_bigtts": "小何 2.0",
     "zh_female_vv_uranus_bigtts": "Vivi",
 }
-DEFAULT_SPEAKER = "zh_male_m191_uranus_bigtts"
+DEFAULT_SPEAKER = "zh_male_liufei_uranus_bigtts"
 
 
 class Event(IntEnum):
